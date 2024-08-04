@@ -1,35 +1,55 @@
-/* evec.c -- initevec, doevec */
+/* evec.c - initevec, doevec */
 
 #include <xinu.h>
-#include <stdio.h>
 
-/*#define STKTRACE*/
-/*#define REGDUMP*/
+/* Interrupt Descriptor */
 
-/*
- * The girmask is used as a mask for interrupts that don't have a
- * handler set. disable() & restore() are OR-ed with it to get the
- * mask actually used.
+struct __attribute__ ((__packed__)) idt {
+	unsigned short	igd_loffset;
+	unsigned short	igd_segsel;
+	unsigned int	igd_rsvd : 5;
+	unsigned int	igd_mbz : 3;
+	unsigned int	igd_type : 5;
+	unsigned int	igd_dpl : 2;
+	unsigned int	igd_present : 1;
+	unsigned short	igd_hoffset;
+};
+
+/* Note:
+ *  Global girmask is used as a mask for interrupts that don't have a
+ *  handler set. disable() & restore() are OR-ed with it to get the
+ *  mask actually used.
  */
 uint16	girmask;
 
-extern	void	setirmask(void);
-extern	struct	idt idt[NID];
-extern	struct	segtr idtr;
-extern	long	defevec[];
-extern	void	userret(void);
-extern	void	init8259();
-extern	int	lidt();
+#define	IMR1	0x21		/* Interrupt Mask Register #1		*/
+#define	IMR2	0xA1		/* Interrupt Mask Register #2		*/
+
+#define	ICU1	0x20		/* I/O port address, 8259A #1		*/
+#define	ICU2	0xA0		/* I/O port address, 8258A #2		*/
+
+#define	OCR	ICU1		/* Operation Command Register		*/
+#define	IMR	(ICU1+1)	/* Interrupt Mask Register		*/
+
+#define	EOI	0x20		/* non-specific end of interrupt	*/
+
+#define NID		48	/* Number of interrupt descriptors	*/
+#define	IGDT_TRAPG	15	/* Trap Gate				*/
+
+void	setirmask(void);	/* Set interrupt mask			*/
+
+extern	struct	idt idt[NID];	/* Interrupt descriptor table		*/
+extern	long	defevec[];	/* Default exception vector		*/
 
 /*------------------------------------------------------------------------
- * initevec - initialize exception vectors to a default handler
+ * initevec  -  Initialize exception vectors to a default handler
  *------------------------------------------------------------------------
  */
 int32	initevec()
 {
 	int	i;
 
-	girmask = 0;	/* until vectors initialized */
+	girmask = 0;	/* Until vectors initialized */
 
 	for (i=0; i<NID; ++i) {
 		set_evec(i, (long)defevec[i]);	
@@ -39,15 +59,33 @@ int32	initevec()
 	 * "girmask" masks all (bus) interrupts with the default handler.
 	 * initially, all, then cleared as handlers are set via set_evec()
 	 */
-	girmask = 0xfffb;	/* leave bit 2 enabled for IC cascade */
+	girmask = 0xfffb;	/* Leave bit 2 enabled for IC cascade */
 
 	lidt();
-	init8259();
-        return(OK);
+	
+	/* Initialize the 8259A interrupt controllers */
+	
+	/* Master device */
+	outb(ICU1, 0x11);	/* ICW1: icw4 needed		*/
+	outb(ICU1+1, 0x20);	/* ICW2: base ivec 32		*/
+	outb(ICU1+1, 0x4);	/* ICW3: cascade on irq2	*/
+	outb(ICU1+1, 0x1);	/* ICW4: buf. master, 808x mode */
+	outb(ICU1, 0xb);	/* OCW3: set ISR on read	*/
+
+	/* Slave device */
+	outb(ICU2, 0x11);	/* ICW1: icw4 needed		*/
+	outb(ICU2+1, 0x28);	/* ICW2: base ivec 40		*/
+	outb(ICU2+1, 0x2);	/* ICW3: slave on irq2		*/
+	outb(ICU2+1, 0xb);	/* ICW4: buf. slave, 808x mode	*/
+	outb(ICU2, 0xb);	/* OCW3: set ISR on read	*/
+
+	setirmask();
+	
+        return OK;
 }
 
 /*------------------------------------------------------------------------
- * set_evec - set exception vector to point to an exception handler
+ * set_evec  -  Set exception vector to point to an exception handler
  *------------------------------------------------------------------------
  */
 int32	set_evec(uint32 xnum, uint32 handler)
@@ -56,7 +94,7 @@ int32	set_evec(uint32 xnum, uint32 handler)
 
 	pidt = &idt[xnum];
 	pidt->igd_loffset = handler;
-	pidt->igd_segsel = 0x8;		/* kernel code segment */
+	pidt->igd_segsel = 0x8;		/* Kernel code segment */
 	pidt->igd_mbz = 0;
 	pidt->igd_type = IGDT_TRAPG;
 	pidt->igd_dpl = 0;
@@ -64,12 +102,26 @@ int32	set_evec(uint32 xnum, uint32 handler)
 	pidt->igd_hoffset = handler >> 16;
 
 	if (xnum > 31 && xnum < 48) {
-		/* enable the interrupt in the global IR mask */
+		/* Enable the interrupt in the global IR mask */
 		xnum -= 32;
 		girmask &= ~(1<<xnum);
-		setirmask();	/* pass it to the hardware */
+		setirmask();	/* Pass it to the hardware */
 	}
-        return(OK);
+        return OK;
+}
+
+/*------------------------------------------------------------------------
+ * setirmask  -  Set the interrupt mask in the controller
+ *------------------------------------------------------------------------
+ */
+void	setirmask(void)
+{
+	if (girmask == 0) {	/* Skip until girmask initialized */
+		return;
+	}
+	outb(IMR1, girmask&0xff);
+	outb(IMR2, (girmask>>8)&0xff);
+	return;
 }
 
 char *inames[] = {
@@ -91,50 +143,59 @@ char *inames[] = {
 	"coprocessor error"
 };
 
-static long *fp;
 /*------------------------------------------------------------------------
- * trap -- print some debugging info when a trap occurred 
- * Note: Need some more work.
+ * trap  -  print debugging info when a trap occurrs
  *------------------------------------------------------------------------
 */
-#define REGDUMP
-
-void trap(int inum)
+void	trap (
+	int	inum,	/* Interrupt number	*/
+	long	*sp	/* Saved stack pointer	*/
+	)
 {
-	long		*sp;
-	intmask 	mask;
+	intmask mask;	/* Saved interrupt mask	*/
+	long	*regs;	/* Pointer to saved regs*/
+
+	/* Disable interrupts */
 
 	mask = disable();
-	kprintf("TRAP\n");
-	asm("movl	%ebp,fp");
-	sp = fp + 15;	/* eflags/CS/eip/ebp/regs/trap#/Xtrap/ebp */
 
-	/********************************************/
-	// kprintf("Xinu trap!\n");
-	
-	kprintf("csup96\n");
-  kprintf("이창섭\n");
-	kprintf("clktime=%d\n," clktime);
-	
-	/********************************************/
+	/* Get the location of saved registers */
 
+	regs = sp;
 
-	if (inum < 16)
+	/* Print the trap message */
+
+	/*----------------------------------------*/
+  kprintf("csup96\n");
+	kprintf("이창섭\n");
+  kprintf("clktime = %u\n", clktime);
+	/*----------------------------------------*/
+	if (inum < 16) {
 		kprintf("exception %d (%s) currpid %d (%s)\n", inum,
 			inames[inum], currpid, proctab[currpid].prname);
-	else
-		kprintf("exception %d currpid %d (%s)\n", inum, currpid, 
+	} else {
+		kprintf("exception %d currpid %d (%s)\n", inum, currpid,
 			proctab[currpid].prname);
-#ifdef REGDUMP
-	kprintf("eflags %X ", *sp--);
-	sp--;	/* skip OLD CS */
-	kprintf("eip %X ", *sp);
-	sp--;
+	}
+
+	/* Adjust stack pointer to get debugging information 	*/
+	/* 8 registers and 1 %ebp pushed in Xint		*/
+
+	sp = regs + 1 + 8;
+
+	/* Print the debugging information related to interrupt	*/
+
 	if (inum == 8 || (inum >= 10 && inum <= 14)) {
 		kprintf("error code %08x (%u)\n", *sp, *sp);
-		sp--;
+		sp++;
 	}
-	sp--;	/* skip FP for Xint call */
+	kprintf("CS %X eip %X\n", *(sp + 1), *sp);
+	kprintf("eflags %X\n", *(sp + 2));
+
+	/* Dump the register values */
+
+	sp = regs + 7;
+
 	kprintf("register dump:\n");
 	kprintf("eax %08X (%u)\n", *sp, *sp);
 	sp--;
@@ -147,16 +208,11 @@ void trap(int inum)
 	kprintf("esp %08X (%u)\n", *sp, *sp);
 	sp--;
 	kprintf("ebp %08X (%u)\n", *sp, *sp);
-	fp = sp;
 	sp--;
 	kprintf("esi %08X (%u)\n", *sp, *sp);
 	sp--;
 	kprintf("edi %08X (%u)\n", *sp, *sp);
 	sp--;
-#endif // REGDUMP
-#ifdef STKTRACE
-	stacktrace(currpid);
-#endif // STKTRACE
 
 	panic("Trap processing complete...\n");
 	restore(mask);

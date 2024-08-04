@@ -1,5 +1,5 @@
-/* intr.s - disable, restore, enable, pause, halt, spurious_irq7,	*/
-/*			spurious_irq15					*/
+/* intr.s - disable, restore, enable, pause, halt, spurious_irq7,				*/
+/*			spurious_irq15																									*/
 
 #include <icu.s>
 
@@ -86,8 +86,8 @@ spurious_irq15:
  *------------------------------------------------------------------------
  */
 Xtrap:
-	call	trap			/* Call C trap handler		*/
-	iret				/* Should never occur		*/
+	call	trap																	/* Call C trap handler		*/
+	iret																				/* Should never occur			*/
 
 /************************************************************************/
 /*									*/
