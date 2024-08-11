@@ -7,7 +7,7 @@
 uint32 gettmslice(void)
 {
   intmask mask;
-  uint32 tm_slice;
+  uint32  tm_slice;
 
   mask = disable();
 

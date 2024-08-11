@@ -2,12 +2,12 @@
 
 /* General type declarations used throughout the kernel */
 
-typedef	unsigned char	byte;
-typedef	unsigned char	uint8;
-typedef	int		int32;
-typedef	short		int16;
-typedef	unsigned int	uint32;
-typedef	unsigned short	uint16;
+typedef	unsigned char			 byte;
+typedef	unsigned char			 uint8;
+typedef	int								 int32;
+typedef	short							 int16;
+typedef	unsigned int			 uint32;
+typedef	unsigned short		 uint16;
 typedef	unsigned long long uint64;
 
 /* Xinu-specific types */
@@ -62,11 +62,10 @@ extern	qid16	readylist;	/* global ID for list of ready processes*/
 #define	CONTEXT	64				/* bytes in a function call context on	*/
 													/* the run-time stack										*/
 
-/******************************************************************/
-// csup96 2024.07.28
+/*----------------------------------------------------------------*/
 // #define	QUANTUM	2			/* time slice in milliseconds						*/
 #define QUANTUM 30
-/******************************************************************/
+/*----------------------------------------------------------------*/
 
 /* Size of the stack for the null process */
 

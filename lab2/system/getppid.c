@@ -7,8 +7,8 @@
 pid32	getppid(pid32 pid)
 {	
   intmask mask;
+  pid32   ppid;
   struct	procent	*prptr;
-  pid32 ppid;
 
   mask = disable();
   if (isbadpid(pid) || pid < 1) {
