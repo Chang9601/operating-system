@@ -52,6 +52,7 @@ pid32	create(
 
 	/*------------------------------*/
 	prptr->prbirth = clktimemilli;
+	prptr->prgrosscpu = 0;
 	/*------------------------------*/
 
 	/* Set up stdin, stdout, and stderr descriptors for the shell		*/

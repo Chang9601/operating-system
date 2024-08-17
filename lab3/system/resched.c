@@ -35,6 +35,14 @@ void	resched(void)		/* Assumes interrupts are disabled	*/
 		insert(currpid, readylist, ptold->prprio);
 	}
 
+	/*-----------------------------------------------------*/
+	if (clktimemilli == currentgrosscpu) {
+		ptold->prgrosscpu++;
+	} else {
+		ptold->prgrosscpu += clktimemilli - currentgrosscpu;
+	}
+	/*-----------------------------------------------------*/
+
 	/* Force context switch to highest priority ready process */
 
 	currpid = dequeue(readylist);
@@ -42,6 +50,10 @@ void	resched(void)		/* Assumes interrupts are disabled	*/
 	ptnew->prstate = PR_CURR;
 	preempt = QUANTUM;		/* Reset time slice for process	*/
 	ctxsw(&ptold->prstkptr, &ptnew->prstkptr);
+
+	/*----------------------------*/
+	currentgrosscpu = clktimemilli;
+	/*----------------------------*/
 
 	/* Old process returns here when resumed */
 
